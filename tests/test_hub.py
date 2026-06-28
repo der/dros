@@ -1,5 +1,6 @@
 import threading
 import time
+from collections.abc import Generator
 from typing import Any
 
 import pytest
@@ -8,8 +9,8 @@ from dros import Bus
 
 
 @pytest.fixture
-def bus_with_hub() -> Bus:
-    bus = Bus(host="127.0.0.1", port=0, max_workers=4)
+def bus_with_hub() -> Generator[Bus, Any, Any]:
+    bus = Bus(host="127.0.0.1", port=0, max_workers=4, ping_timeout=1, ping_interval=1)
     bus.start()
     yield bus
     bus.stop()
@@ -21,7 +22,10 @@ class TestHub:
         received: list[dict[str, Any]] = []
         event = threading.Event()
 
-        bus.subscribe("test", lambda m: (received.append(m), event.set()), mode="event")
+        def callback(m: dict[str, Any]) -> None:
+            received.append(m)
+            event.set()
+        bus.subscribe("test", callback, mode="event")
 
         import socketio
         sio_client = socketio.Client()
@@ -109,7 +113,11 @@ class TestHub:
         bus = Bus()
         received: list[dict[str, Any]] = []
         event = threading.Event()
-        bus.subscribe("test", lambda m: (received.append(m), event.set()), mode="event")
+
+        def callback(m: dict[str, Any]) -> None:
+            received.append(m)
+            event.set()
+        bus.subscribe("test", callback, mode="event")
         bus.start()
         bus.publish("test", {"x": 1})
         assert event.wait(timeout=2)

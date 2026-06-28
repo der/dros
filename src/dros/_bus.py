@@ -69,6 +69,8 @@ class Bus:
         port: int | None = None,
         *,
         max_workers: int = 16,
+        ping_timeout: float = 2.0,
+        ping_interval: float = 5.0,
     ) -> None:
         self._topics: dict[str, Topic] = {}
         self._local_subs: dict[str, list[_EventSub | _StreamSub]] = {}
@@ -81,7 +83,10 @@ class Bus:
 
         self._host = host
         self._port = port
+        self._ping_timeout = ping_timeout
+        self._ping_interval = ping_interval
         self._sio: socketio.Server | None = None
+        self._wsgi_server: Any = None
         self._wsgi_thread: threading.Thread | None = None
 
         for name in self.RESERVED_TOPICS:
@@ -171,8 +176,6 @@ class Bus:
     def start(self) -> None:
         self._running.set()
 
-        self.publish("startup", {"topic": "startup"})
-
         for node in self._nodes:
             if hasattr(node, "startup"):
                 try:
@@ -183,6 +186,8 @@ class Bus:
         for node in self._nodes:
             if hasattr(node, "_schedule_tick"):
                 node._schedule_tick()  # type: ignore[union-attr]
+
+        self.publish("startup", {"topic": "startup"})
 
         if self._host is not None and self._port is not None:
             self._start_wsgi()
@@ -216,6 +221,7 @@ class Bus:
             self._sid_to_topics.clear()
 
         if self._wsgi_thread is not None and self._wsgi_thread.is_alive():
+            self._wsgi_server.shutdown()
             self._wsgi_thread.join(timeout=2.0)
 
         self._executor.shutdown(wait=True)
@@ -245,23 +251,18 @@ class Bus:
     def _start_wsgi(self) -> None:
         import socketio
 
-        self._sio = socketio.Server(async_mode="threading")
+        self._sio = socketio.Server(
+            async_mode="threading",
+            ping_timeout=self._ping_timeout,
+            ping_interval=self._ping_interval,
+        )
+        assert self._sio is not None
         self._sio.on("connect", self._on_connect)
         self._sio.on("disconnect", self._on_disconnect)
         self._sio.on("subscribe", self._on_remote_subscribe)
         self._sio.on("unsubscribe", self._on_remote_unsubscribe)
         self._sio.on("publish", self._on_remote_publish)
 
-        app = socketio.WSGIApp(self._sio)
-        ready = threading.Event()
-        self._wsgi_thread = threading.Thread(
-            target=self._serve_wsgi, args=(app, ready), daemon=True
-        )
-        self._wsgi_thread.start()
-        ready.wait(timeout=2.0)
-        logger.info("Socket.IO server listening on %s:%d", self._host, self._port)
-
-    def _serve_wsgi(self, app: Any, ready: threading.Event) -> None:
         from socketserver import ThreadingMixIn
         from wsgiref.simple_server import WSGIServer, make_server
 
@@ -269,10 +270,16 @@ class Bus:
             daemon_threads = True
 
         assert self._host is not None and self._port is not None
-        server = make_server(self._host, self._port, app, server_class=ThreadingWSGIServer)
-        self._port = server.server_port
-        ready.set()
-        server.serve_forever()
+        app = socketio.WSGIApp(self._sio)
+        self._wsgi_server = make_server(
+            self._host, self._port, app, server_class=ThreadingWSGIServer
+        )
+        self._port = self._wsgi_server.server_port
+        self._wsgi_thread = threading.Thread(
+            target=self._wsgi_server.serve_forever, daemon=True
+        )
+        self._wsgi_thread.start()
+        logger.info("Socket.IO server listening on %s:%d", self._host, self._port)
 
     def _on_connect(self, sid: str, environ: dict[str, object]) -> None:
         with self._lock:
