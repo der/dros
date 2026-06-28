@@ -1,0 +1,24 @@
+[project]
+name = "dros"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["python-socketio>=5"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "python-socketio[client]>=5", "ruff", "pyright"]
+
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.pyright]
+typeCheckingMode = "standard"

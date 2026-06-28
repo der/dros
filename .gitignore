@@ -1,0 +1,11 @@
+venv
+.venv
+build
+install
+log
+*.pyc
+__pycache__
+.venv
+*.egg-info
+logs
+yolo26*.*
