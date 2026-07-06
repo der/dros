@@ -1,22 +1,22 @@
 # Dave's ROS (dros)
 
 An in-memory event bus with built-in socket.io support for robotics messaging.
-Inspired by [dfdx labs](https://dfdxlabs.com/research/2026/robotics-setup/#software-setup).
+Inspired by ROS2 and [dfdx labs](https://dfdxlabs.com/research/2026/robotics-setup/#software-setup).
 
 ## Features
 
 - **In-process event bus** — nodes publish and subscribe to named topics
-- **Stream and event subscribers** — queue-backed daemon threads or ThreadPoolExecutor callbacks
+- **Stream and event subscribers** — queue-backed daemon threads or direct (thread pool) callbacks
 - **State topics** — retain the last N messages, queryable without subscribing
 - **Socket.io hub** — server mode for remote clients, client mode to connect to a remote hub
-- **Tick scheduling** — per-node recurring timer callbacks
+- **Tick scheduling** — optional per-node recurring timer callbacks
 - **Thread-safe** — all shared state guarded by `RLock`, callbacks run outside locks
 - **No async** — threading throughout, compatible with threaded I/O (audio, cameras)
 
 ## Install
 
 ```bash
-pip install -e .
+uv sync --all-extras --dev
 ```
 
 Requires Python ≥ 3.12. Only runtime dependency is `python-socketio`.
@@ -140,6 +140,10 @@ bus.publish("robot/pose", {"x": 1.0, "y": 2.0})
 bus.topic("robot/pose").current()   # -> {"x": 1.0, "y": 2.0}
 bus.topic("robot/pose").history()   # -> list of last 10
 ```
+
+### Messages
+
+Messages are dicts with string keys and values compatible with socket.io which includes byte[], string and ints.
 
 ## API Summary
 
