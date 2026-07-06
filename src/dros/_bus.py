@@ -75,6 +75,7 @@ class Bus:
         self._nodes: list[object] = []
         self._lock = threading.RLock()
         self._running = threading.Event()
+        self._shutdown_event = threading.Event()
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._msg_counter = 0
 
@@ -219,12 +220,13 @@ class Bus:
         self._transport.stop()
 
         self._executor.shutdown(wait=True)
+        self._shutdown_event.set()
         logger.info("Bus stopped")
 
     def run(self) -> None:
         self.start()
         try:
-            self._running.wait()
+            self._shutdown_event.wait()
         except KeyboardInterrupt:
             pass
         finally:
