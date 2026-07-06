@@ -71,3 +71,32 @@ class Node:
         self._running.clear()
         if self._timer is not None:
             self._timer.cancel()
+
+
+class SourceNode(Node):
+    def __init__(self, bus: Bus, *, interval: float = 0.0) -> None:
+        super().__init__(bus, interval=interval)
+        self._source_running = threading.Event()
+        self._source_thread: threading.Thread | None = None
+
+    def run(self) -> None:
+        pass
+
+    def startup(self) -> None:
+        super().startup()
+        self._source_running.set()
+        self._source_thread = threading.Thread(target=self._source_loop, daemon=True)
+        self._source_thread.start()
+
+    def shutdown(self) -> None:
+        self._source_running.clear()
+        if self._source_thread is not None:
+            self._source_thread.join(timeout=5.0)
+        super().shutdown()
+
+    def _source_loop(self) -> None:
+        while self._source_running.is_set():
+            try:
+                self.run()
+            except Exception:
+                logger.warning("Error in %s.run()", self.name, exc_info=True)

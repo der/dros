@@ -10,6 +10,7 @@ Inspired by ROS2 and [dfdx labs](https://dfdxlabs.com/research/2026/robotics-set
 - **State topics** — retain the last N messages, queryable without subscribing
 - **Socket.io hub** — server mode for remote clients, client mode to connect to a remote hub
 - **Tick scheduling** — optional per-node recurring timer callbacks
+- **Source nodes** — long-running processing threads that publish messages in a loop
 - **Thread-safe** — all shared state guarded by `RLock`, callbacks run outside locks
 - **No async** — threading throughout, compatible with threaded I/O (audio, cameras)
 
@@ -26,15 +27,20 @@ Requires Python ≥ 3.12. Only runtime dependency is `python-socketio`.
 ### Local Bus
 
 ```python
-from dros import Bus, Node
+from dros import Bus, Node, SourceNode
 
-class SensorNode(Node):
+class SensorNode(SourceNode):
     def __init__(self, bus):
         super().__init__(bus, interval=0.1)
         self.subscribe_event("cmd/vel", self.on_cmd)
 
+    def run(self):
+        """Polls sensor hardware and publishes readings."""
+        reading = read_sensor()
+        self.publish("sensors/lidar", {"range": reading})
+
     def on_cmd(self, msg):
-        self.publish("sensors/lidar", {"range": 1.5})
+        ...
 
 bus = Bus()
 SensorNode(bus)
@@ -104,6 +110,17 @@ class MyNode(Node):
     self.publish(topic, message)
 ```
 
+### SourceNode
+
+A `Node` subclass that runs a processing thread in the background. Override `run()` to poll hardware, generate messages, or run any continuous loop. The thread starts on `bus.start()` and stops on `bus.stop()`.
+
+```python
+class CameraNode(SourceNode):
+    def run(self) -> None:
+        frame = camera.capture()
+        self.publish("camera/frame", {"data": frame})
+```
+
 ### Transport
 
 Socket.io transport layer. Three implementations:
@@ -167,6 +184,9 @@ node.startup() / node.shutdown() / node.tick() / node.process(msg)
 node.subscribe_stream(topic, callback)
 node.subscribe_event(topic, callback)
 node.publish(topic, message)
+
+# SourceNode (extends Node)
+node.run()                         # override: called repeatedly in a background thread
 
 # Transport
 transport = NoopTransport()

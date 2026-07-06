@@ -2,9 +2,7 @@ import threading
 import time
 from typing import Any
 
-import pytest
-
-from dros import Bus, Node
+from dros import Bus, Node, SourceNode
 
 
 class TestBusBasic:
@@ -251,3 +249,101 @@ class TestNode:
         time.sleep(0.2)
         bus.stop()
         assert len(errors) >= 1
+
+
+class TestSourceNode:
+    def test_source_node_publishes(self) -> None:
+        bus = Bus()
+        received: list[dict[str, Any]] = []
+        done = threading.Event()
+
+        class PubSource(SourceNode):
+            def run(self) -> None:
+                if not done.is_set():
+                    self.publish("data", {"val": 1})
+                    done.set()
+
+        PubSource(bus)
+        bus.subscribe("data", lambda m: received.append(m), mode="event")
+        bus.start()
+        assert done.wait(timeout=2.0)
+        bus.stop()
+        assert received[0] == {"val": 1}
+
+    def test_source_node_runs_continuously(self) -> None:
+        bus = Bus()
+        counter: list[int] = [0]
+        done = threading.Event()
+
+        class CounterSource(SourceNode):
+            def run(self) -> None:
+                counter[0] += 1
+                if counter[0] >= 5:
+                    done.set()
+
+        CounterSource(bus)
+        bus.start()
+        assert done.wait(timeout=2.0)
+        bus.stop()
+        assert counter[0] >= 5
+
+    def test_source_node_shutdown_stops_thread(self) -> None:
+        bus = Bus()
+        counter: list[int] = [0]
+        started = threading.Event()
+
+        class LoopSource(SourceNode):
+            def run(self) -> None:
+                counter[0] += 1
+                started.set()
+
+        LoopSource(bus)
+        bus.start()
+        assert started.wait(timeout=2.0)
+        time.sleep(0.3)
+        bus.stop()
+        after = counter[0]
+        time.sleep(0.2)
+        assert counter[0] == after
+
+    def test_source_node_error_logged(self) -> None:
+        bus = Bus()
+        errors: list[int] = []
+        done = threading.Event()
+
+        class BadSource(SourceNode):
+            def run(self) -> None:
+                errors.append(1)
+                done.set()
+                raise RuntimeError("source error")
+
+        BadSource(bus)
+        bus.start()
+        assert done.wait(timeout=2.0)
+        time.sleep(0.2)
+        bus.stop()
+        assert len(errors) >= 1
+
+    def test_source_node_with_tick(self) -> None:
+        bus = Bus()
+        ticks: list[int] = []
+        sources: list[int] = []
+        done = threading.Event()
+
+        class ComboNode(SourceNode):
+            def run(self) -> None:
+                sources.append(1)
+                if len(sources) >= 3 and len(ticks) >= 2:
+                    done.set()
+
+            def tick(self) -> None:
+                ticks.append(1)
+                if len(sources) >= 3 and len(ticks) >= 2:
+                    done.set()
+
+        ComboNode(bus, interval=0.05)
+        bus.start()
+        assert done.wait(timeout=2.0)
+        bus.stop()
+        assert len(sources) >= 3
+        assert len(ticks) >= 2

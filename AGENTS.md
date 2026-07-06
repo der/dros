@@ -32,7 +32,7 @@ Modules (all under `src/dros/`):
 | File | Public | Purpose |
 |------|--------|---------|
 | `_bus.py` | `Bus` | Event bus, pub/sub, lifecycle |
-| `_node.py` | `Node` | Base class for nodes with tick scheduling |
+| `_node.py` | `Node`, `SourceNode` | Base class for nodes with tick scheduling; SourceNode adds a background processing thread |
 | `_topic.py` | `Topic` | Event topics (stateless) and state topics (history) |
 | `_transport.py` | `Transport`, `NoopTransport`, `ServerTransport`, `ClientTransport` | Socket.io transport layer |
 | `_exceptions.py` | `BusError`, `TopicTypeError` | Custom exceptions |
@@ -51,6 +51,7 @@ Modules (all under `src/dros/`):
 
 - All threading, no async. `ThreadPoolExecutor` for event callbacks, `queue.Queue` + daemon threads for stream subscribers.
 - Per-node `threading.Timer` for tick scheduling (auto-reschedule, cancel on shutdown).
+- SourceNode spawns a daemon thread in `startup()` that calls `run()` in a loop until `shutdown()`.
 - Bus state guarded by `threading.RLock`. Lock held briefly for mutation; callbacks run outside the lock.
 - Server transport runs WSGI in a daemon thread; client transport runs the connect loop in a daemon thread.
 
@@ -69,4 +70,4 @@ Modules (all under `src/dros/`):
 - Stream subscriber threads are daemon threads and share the process lifetime.
 - Client transport emits `subscribe`/`unsubscribe` only when connected. Topics tracked in `_topics` are re-subscribed on reconnect.
 - Server transport forwards remote publishes to other sids but NOT back to the sender (no echo).
-- 
+- SourceNode thread runs a tight loop calling `run()`; if `run()` doesn't have a blocking call or sleep, it will consume CPU continuously. Add appropriate throttling if needed. 
