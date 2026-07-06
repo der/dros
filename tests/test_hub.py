@@ -6,11 +6,15 @@ from typing import Any
 import pytest
 
 from dros import Bus
+from dros._transport import ServerTransport
 
 
 @pytest.fixture
 def bus_with_hub() -> Generator[Bus, Any, Any]:
-    bus = Bus(host="127.0.0.1", port=0, max_workers=4, ping_timeout=1, ping_interval=1)
+    transport = ServerTransport(
+        host="127.0.0.1", port=0, ping_timeout=1, ping_interval=1
+    )
+    bus = Bus(transport=transport, max_workers=4)
     bus.start()
     yield bus
     bus.stop()
@@ -25,9 +29,11 @@ class TestHub:
         def callback(m: dict[str, Any]) -> None:
             received.append(m)
             event.set()
+
         bus.subscribe("test", callback, mode="event")
 
         import socketio
+
         sio_client = socketio.Client()
         got = threading.Event()
 
@@ -35,7 +41,7 @@ class TestHub:
         def on_connect() -> None:
             got.set()
 
-        port = bus._port
+        port = bus._transport.port
         sio_client.connect(
             f"http://127.0.0.1:{port}",
             transports=["polling"],
@@ -51,6 +57,7 @@ class TestHub:
     def test_remote_subscribe_receives_publish(self, bus_with_hub: Bus) -> None:
         bus = bus_with_hub
         import socketio
+
         sio_client = socketio.Client()
         received: list[dict[str, Any]] = []
         got = threading.Event()
@@ -63,7 +70,7 @@ class TestHub:
         def on_publish(data: dict[str, Any]) -> None:
             received.append(data["message"])
 
-        port = bus._port
+        port = bus._transport.port
         sio_client.connect(
             f"http://127.0.0.1:{port}",
             transports=["polling"],
@@ -82,6 +89,7 @@ class TestHub:
     def test_remote_disconnect_cleans_up(self, bus_with_hub: Bus) -> None:
         bus = bus_with_hub
         import socketio
+
         sio_client = socketio.Client()
         got = threading.Event()
 
@@ -89,7 +97,7 @@ class TestHub:
         def on_connect() -> None:
             got.set()
 
-        port = bus._port
+        port = bus._transport.port
         sio_client.connect(
             f"http://127.0.0.1:{port}",
             transports=["polling"],
@@ -100,14 +108,14 @@ class TestHub:
         sio_client.emit("subscribe", "sensors")
         time.sleep(0.1)
 
-        with bus._lock:
-            assert "sensors" in bus._remote_subs
+        transport = bus._transport
+        assert isinstance(transport, ServerTransport)
+        assert "sensors" in transport._remote_subs
 
         sio_client.disconnect()
         time.sleep(0.1)
 
-        with bus._lock:
-            assert "sensors" not in bus._remote_subs
+        assert "sensors" not in transport._remote_subs
 
     def test_bus_without_hub(self) -> None:
         bus = Bus()
@@ -117,6 +125,7 @@ class TestHub:
         def callback(m: dict[str, Any]) -> None:
             received.append(m)
             event.set()
+
         bus.subscribe("test", callback, mode="event")
         bus.start()
         bus.publish("test", {"x": 1})

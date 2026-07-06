@@ -8,7 +8,7 @@ Inspired by [dfdx labs](https://dfdxlabs.com/research/2026/robotics-setup/#softw
 - **In-process event bus** — nodes publish and subscribe to named topics
 - **Stream and event subscribers** — queue-backed daemon threads or ThreadPoolExecutor callbacks
 - **State topics** — retain the last N messages, queryable without subscribing
-- **Socket.io hub** — remote clients connect, subscribe, and publish bidirectionally
+- **Socket.io hub** — server mode for remote clients, client mode to connect to a remote hub
 - **Tick scheduling** — per-node recurring timer callbacks
 - **Thread-safe** — all shared state guarded by `RLock`, callbacks run outside locks
 - **No async** — threading throughout, compatible with threaded I/O (audio, cameras)
@@ -21,41 +21,109 @@ pip install -e .
 
 Requires Python ≥ 3.12. Only runtime dependency is `python-socketio`.
 
-## Main Classes
+## Quick Start
 
-### Bus
-
-The central event bus. Owns topics, routes messages, manages node lifecycle, runs the socket.io server.
+### Local Bus
 
 ```python
-from dros import Bus
-
-# local-only
-bus = Bus()
-bus.start()
-
-# with socket.io hub
-bus = Bus(host="0.0.0.0", port=8765)
-bus.run()  # start() + block until KeyboardInterrupt
-```
-
-### Node
-
-Base class for nodes. Hooks for `startup()`, `shutdown()`, `tick()`, and `process()`.
-
-```python
-from dros import Node
+from dros import Bus, Node
 
 class SensorNode(Node):
     def __init__(self, bus):
-        super().__init__(bus, interval=0.1)  # tick every 100ms
+        super().__init__(bus, interval=0.1)
         self.subscribe_event("cmd/vel", self.on_cmd)
 
     def on_cmd(self, msg):
         self.publish("sensors/lidar", {"range": 1.5})
 
-    def tick(self):
-        self.publish("heartbeat", {"node": self.name})
+bus = Bus()
+SensorNode(bus)
+
+with bus:
+    bus.publish("cmd/vel", {"v": 1.0})
+```
+
+### Server Hub
+
+```python
+from dros import Bus, ServerTransport
+
+transport = ServerTransport(host="0.0.0.0", port=8765)
+bus = Bus(transport=transport)
+# register nodes...
+bus.start()
+# remote clients can now connect
+```
+
+### Client Hub
+
+```python
+from dros import Bus, ClientTransport, Node
+
+class LoggerNode(Node):
+    def on_sensor(self, msg):
+        print(f"Sensor reading: {msg}")
+
+transport = ClientTransport("http://192.168.1.50:8765")
+bus = Bus(transport=transport)
+node = LoggerNode(bus)
+node.subscribe_event("sensors/lidar", node.on_sensor)
+bus.start()
+# receives messages from remote hub
+```
+
+## Main Classes
+
+### Bus
+
+Central event bus. Owns topics, routes messages, manages node lifecycle, delegates socket.io to a transport.
+
+```python
+bus = Bus()                                    # local only
+bus = Bus(transport=ServerTransport(...))       # socket.io server
+bus = Bus(transport=ClientTransport(...))       # socket.io client
+```
+
+### Node
+
+Base class for nodes with lifecycle hooks and tick scheduling.
+
+```python
+class MyNode(Node):
+    def __init__(self, bus):
+        super().__init__(bus, interval=0.0)  # interval=0 = no tick
+        self.name       # str, defaults to class name
+
+    def startup(self) -> None: ...
+    def shutdown(self) -> None: ...
+    def tick(self) -> None: ...           # called at interval
+    def process(self, msg) -> None: ...   # default callback
+
+    self.subscribe_stream(topic, callback)
+    self.subscribe_event(topic, callback)
+    self.publish(topic, message)
+```
+
+### Transport
+
+Socket.io transport layer. Three implementations:
+
+| Class | Purpose |
+|-------|---------|
+| `NoopTransport` | Local-only (default when no transport given) |
+| `ServerTransport(host, port, *, ping_timeout, ping_interval)` | Socket.io server hub via WSGI |
+| `ClientTransport(server_url, *, ping_timeout, ping_interval)` | Socket.io client, auto-reconnects |
+
+Custom transports can extend `Transport` ABC:
+
+```python
+class Transport(ABC):
+    def publish(self, topic, message, msg_id) -> None: ...
+    def subscribe(self, topic) -> None: ...
+    def unsubscribe(self, topic) -> None: ...
+    def set_on_publish(self, callback) -> None: ...
+    def start(self) -> None: ...
+    def stop(self) -> None: ...
 ```
 
 ### Topic
@@ -66,61 +134,57 @@ Implicitly created by subscribe or publish. Two types:
 - **state** — retains the most recent message(s) for querying
 
 ```python
-bus.state_topic("robot/pose", history=10)  # keep last 10
+bus.state_topic("robot/pose", history=10)
 
 bus.publish("robot/pose", {"x": 1.0, "y": 2.0})
-pose = bus.topic("robot/pose").current()   # -> {"x": 1.0, "y": 2.0}
-history = bus.topic("robot/pose").history() # -> list of last 10
+bus.topic("robot/pose").current()   # -> {"x": 1.0, "y": 2.0}
+bus.topic("robot/pose").history()   # -> list of last 10
 ```
 
 ## API Summary
 
 ```python
 # Bus
-bus = Bus(host=None, port=None, *, max_workers=16, ping_timeout=5, ping_interval=25)
-bus.topic(name)                    # -> Topic (auto-create event topic)
-bus.state_topic(name, history=0)   # -> Topic (create state topic)
+bus = Bus(transport=None, *, max_workers=16)
+bus.topic(name)                     # -> Topic (auto-create event topic)
+bus.state_topic(name, history=0)    # -> Topic (create state topic)
 bus.subscribe(topic, callback, *, mode="event" | "stream")
 bus.unsubscribe(topic, callback)
 bus.publish(topic, message)
 bus.register_node(node)
-bus.start()                        # publish startup, launch WSGI, start ticks
-bus.stop()                         # publish shutdown, cancel ticks, shutdown server
-bus.run()                          # start() + block until interrupt
-with bus: ...                      # context manager (auto start/stop)
+bus.start()
+bus.stop()
+bus.run()                           # start() + block until KeyboardInterrupt
+with bus: ...                       # context manager (auto start/stop)
 
 # Node
-class MyNode(Node):
-    def __init__(self, bus, *, interval=0.0): ...
-    name        # str, defaults to class name
-    startup()   # called on bus.start()
-    shutdown()  # called on bus.stop()
-    tick()      # called at interval (if interval > 0)
-    process(msg)  # default callback
-    subscribe_stream(topic, callback)
-    subscribe_event(topic, callback)
-    publish(topic, message)
+node.name
+node.startup() / node.shutdown() / node.tick() / node.process(msg)
+node.subscribe_stream(topic, callback)
+node.subscribe_event(topic, callback)
+node.publish(topic, message)
 
-# Topic
-t = Topic(name, *, topic_type="event" | "state", history_limit=None)
-t.record(message)    # store if state topic
-t.current()          # -> Message | None (state only)
-t.history()          # -> list[Message] (state only)
+# Transport
+transport = NoopTransport()
+transport = ServerTransport(host="0.0.0.0", port=8765, *, ping_timeout=5, ping_interval=25)
+transport = ClientTransport("http://host:port", *, ping_timeout=5, ping_interval=25)
+transport.port          # ServerTransport only: actual bound port
+transport.start() / transport.stop()
 ```
 
 ## Socket.IO Protocol
-
-Remote clients connect to the bus hub. Supported events:
 
 | Client → Server | Args | Effect |
 |---|---|---|
 | `subscribe` | `topic: str` | Subscribe to topic |
 | `unsubscribe` | `topic: str` | Unsubscribe from topic |
-| `publish` | `{topic, message}` | Publish message to topic |
+| `publish` | `{topic, message, msg_id}` | Publish message to topic |
 
 | Server → Client | Args | Effect |
 |---|---|---|
-| `publish` | `{topic, message}` | Message broadcast on subscribed topic |
+| `publish` | `{topic, message, msg_id}` | Message broadcast on subscribed topic |
+
+Message deduplication uses a monotonic `msg_id` assigned by the Bus. Client transports skip messages with IDs they recently sent, preventing loopback when a client both publishes and subscribes to the same topic.
 
 ## Development
 
