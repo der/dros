@@ -179,6 +179,7 @@ class Bus:
         for node in self._nodes:
             if hasattr(node, "startup"):
                 try:
+                    logger.info("Starting up: %s", node)
                     node.startup()  # type: ignore[union-attr]
                 except Exception:
                     logger.warning("Error in startup of %s", node, exc_info=True)  # type: ignore[union-attr]
@@ -233,6 +234,7 @@ class Bus:
             self.stop()
 
     def __enter__(self) -> Bus:
+        print("Entering Bus context")
         self.start()
         return self
 

@@ -21,6 +21,9 @@ class Node:
     @property
     def name(self) -> str:
         return self.__class__.__name__
+    
+    def __str__(self) -> str:
+        return f"Node({self.name})"
 
     def startup(self) -> None:
         pass
@@ -35,14 +38,14 @@ class Node:
         pass
 
     def subscribe_stream(
-        self, topic: str, callback: Callable[[dict[str, object]], None]
+        self, topic: str, callback: Callable[[dict[str, object]], None] | None = None
     ) -> None:
-        self.bus.subscribe(topic, callback, mode="stream")
+        self.bus.subscribe(topic, callback or self.process, mode="stream")
 
     def subscribe_event(
-        self, topic: str, callback: Callable[[dict[str, object]], None]
+        self, topic: str, callback: Callable[[dict[str, object]], None] | None = None
     ) -> None:
-        self.bus.subscribe(topic, callback, mode="event")
+        self.bus.subscribe(topic, callback or self.process, mode="event")
 
     def publish(self, topic: str, message: dict[str, object]) -> None:
         self.bus.publish(topic, message)
