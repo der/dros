@@ -320,10 +320,9 @@ class ClientTransport(Transport):
                 logger.warning(
                     "Connection to %s failed, retrying...",
                     self._server_url,
-                    exc_info=True,
                 )
                 if not self._stop.is_set():
-                    _time.sleep(0.5)
+                    _time.sleep(2.0)
             finally:
                 with contextlib.suppress(Exception):
                     client.disconnect()
