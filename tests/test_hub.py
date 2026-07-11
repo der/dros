@@ -44,7 +44,7 @@ class TestHub:
         port = bus._transport.port
         sio_client.connect(
             f"http://127.0.0.1:{port}",
-            transports=["polling"],
+            transports=["websocket"],
             wait_timeout=5,
         )
         assert got.wait(timeout=3)
@@ -73,7 +73,7 @@ class TestHub:
         port = bus._transport.port
         sio_client.connect(
             f"http://127.0.0.1:{port}",
-            transports=["polling"],
+            transports=["websocket"],
             wait_timeout=5,
         )
         assert got.wait(timeout=3)
@@ -100,7 +100,7 @@ class TestHub:
         port = bus._transport.port
         sio_client.connect(
             f"http://127.0.0.1:{port}",
-            transports=["polling"],
+            transports=["websocket"],
             wait_timeout=5,
         )
         assert got.wait(timeout=3)

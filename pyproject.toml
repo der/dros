@@ -3,7 +3,8 @@ name = "dros"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "python-socketio>=5"
+    "python-socketio>=5",
+    "werkzeug>=3",
 ]
 
 [project.optional-dependencies]

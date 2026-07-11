@@ -118,16 +118,14 @@ class ServerTransport(Transport):
         self._sio.on("unsubscribe", self._on_remote_unsubscribe)
         self._sio.on("publish", self._on_remote_publish)
 
-        from socketserver import ThreadingMixIn
-        from wsgiref.simple_server import WSGIServer, make_server
-
-        class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
-            daemon_threads = True
-            allow_reuse_address = True
+        from werkzeug.serving import make_server
 
         app = socketio.WSGIApp(self._sio)
         self._wsgi_server = make_server(
-            self._host, self._port, app, server_class=ThreadingWSGIServer
+            self._host,
+            self._port,
+            app,
+            threaded=True,
         )
         self._port = self._wsgi_server.server_port
         self._wsgi_thread = threading.Thread(
@@ -137,6 +135,10 @@ class ServerTransport(Transport):
         logger.info("Socket.IO server listening on %s:%d", self._host, self._port)
 
     def stop(self) -> None:
+        if self._sio is not None:
+            for sid in list(self._sid_to_topics):
+                with contextlib.suppress(Exception):
+                    self._sio.disconnect(sid)
         if self._wsgi_thread is not None and self._wsgi_thread.is_alive():
             self._wsgi_server.shutdown()
             self._wsgi_thread.join(timeout=2.0)
@@ -309,10 +311,10 @@ class ClientTransport(Transport):
             try:
                 client.connect(
                     self._server_url,
-                    transports=["polling"],
+                    transports=["websocket"],
                     wait_timeout=5,
                 )
-                while not self._stop.is_set():
+                while not self._stop.is_set() and client.connected:
                     client.sleep(0.5)  # type: ignore[reportArgumentType]
             except Exception:
                 logger.warning(
