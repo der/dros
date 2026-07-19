@@ -144,6 +144,22 @@ class Bus:
         if topic not in self.RESERVED_TOPICS:
             self._transport.publish(topic, message, msg_id)
 
+    def clear_topic_queue(self, topic: str) -> None:
+        with self._lock:
+            subs = self._local_subs.get(topic, [])
+            for sub in subs:
+                if isinstance(sub, _StreamSub):
+                    self._drain_queue(sub.queue)
+
+    @staticmethod
+    def _drain_queue(q: queue.Queue[dict[str, object] | None]) -> None:
+        while True:
+            try:
+                q.get_nowait()
+                q.task_done()
+            except queue.Empty:
+                break
+
     def _on_transport_publish(
         self, topic: str, message: dict[str, object], msg_id: int
     ) -> None:

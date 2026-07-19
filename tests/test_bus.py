@@ -57,6 +57,73 @@ class TestBusBasic:
         assert received == [{"data": 42}]
         bus.stop()
 
+    def test_clear_topic_queue_drains_stream_subs(self) -> None:
+        bus = Bus()
+        received: list[dict[str, Any]] = []
+        done = threading.Event()
+        record = threading.Event()
+        gate = threading.Event()
+
+        def cb(msg: dict[str, object]) -> None:
+            gate.wait()
+            if record.is_set():
+                received.append(msg)
+                if len(received) >= 1:
+                    done.set()
+
+        bus.subscribe("test", cb, mode="stream")
+        bus.publish("test", {"data": 1})
+        bus.publish("test", {"data": 2})
+        bus.publish("test", {"data": 3})
+        time.sleep(0.1)
+        bus.clear_topic_queue("test")
+        gate.set()
+        time.sleep(0.1)
+        record.set()
+        bus.publish("test", {"data": 4})
+        assert done.wait(timeout=2.0)
+        assert received == [{"data": 4}]
+        bus.stop()
+
+    def test_clear_topic_queue_noop_without_subs(self) -> None:
+        bus = Bus()
+        bus.clear_topic_queue("nonexistent")
+        bus.stop()
+
+    def test_clear_topic_queue_leaves_events(self) -> None:
+        bus = Bus()
+        event_received: list[dict[str, Any]] = []
+        done = threading.Event()
+
+        def event_cb(msg: dict[str, object]) -> None:
+            event_received.append(msg)
+            if len(event_received) >= 2:
+                done.set()
+
+        bus.subscribe("test", event_cb, mode="event")
+        bus.publish("test", {"data": 1})
+        bus.publish("test", {"data": 2})
+        bus.clear_topic_queue("test")
+        assert done.wait(timeout=2.0)
+        assert len(event_received) == 2
+        bus.stop()
+
+    def test_clear_topic_queue_safe_on_empty(self) -> None:
+        bus = Bus()
+        received: list[dict[str, Any]] = []
+        done = threading.Event()
+
+        def cb(msg: dict[str, object]) -> None:
+            received.append(msg)
+            done.set()
+
+        bus.subscribe("test", cb, mode="stream")
+        bus.clear_topic_queue("test")
+        bus.publish("test", {"data": 1})
+        assert done.wait(timeout=2.0)
+        assert received == [{"data": 1}]
+        bus.stop()
+
     def test_multiple_subscribers(self) -> None:
         bus = Bus()
         events = [threading.Event() for _ in range(3)]
@@ -213,6 +280,50 @@ class TestNode:
         bus.publish("data", {"val": 99})
         assert event.wait(timeout=2.0)
         assert received == [{"val": 99}]
+        bus.stop()
+
+    def test_node_clear_topic_queue(self) -> None:
+        bus = Bus()
+        stream_received: list[dict[str, Any]] = []
+        done = threading.Event()
+
+        class ClearNode(Node):
+            def on_data(self, msg: dict[str, object]) -> None:
+                stream_received.append(msg)
+                done.set()
+
+        node = ClearNode(bus)
+        node.subscribe_stream("data", node.on_data)
+        bus.start()
+        bus.publish("data", {"val": 1})
+        bus.publish("data", {"val": 2})
+        node.clear_topic_queue("data")
+        bus.publish("data", {"val": 3})
+        assert done.wait(timeout=2.0)
+        assert stream_received == [{"val": 3}]
+        bus.stop()
+
+    def test_node_clear_topic_queue_foreign_topic(self) -> None:
+        bus = Bus()
+        stream_received: list[dict[str, Any]] = []
+        done = threading.Event()
+
+        def cb(msg: dict[str, object]) -> None:
+            stream_received.append(msg)
+            done.set()
+
+        class ClearNode(Node):
+            pass
+
+        node = ClearNode(bus)
+        bus.subscribe("other", cb, mode="stream")
+        bus.start()
+        bus.publish("other", {"val": 1})
+        bus.publish("other", {"val": 2})
+        node.clear_topic_queue("other")
+        bus.publish("other", {"val": 3})
+        assert done.wait(timeout=2.0)
+        assert stream_received == [{"val": 3}]
         bus.stop()
 
     def test_node_publish(self) -> None:

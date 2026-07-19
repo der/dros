@@ -50,6 +50,9 @@ class Node:
     def publish(self, topic: str, message: dict[str, object]) -> None:
         self.bus.publish(topic, message)
 
+    def clear_topic_queue(self, topic: str) -> None:
+        self.bus.clear_topic_queue(topic)
+
     def _schedule_tick(self) -> None:
         if self.interval > 0:
             self._running.set()
