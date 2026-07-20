@@ -144,3 +144,46 @@ class TestClient:
 
         server_new.stop()
         client.stop()
+
+    def test_local_stream_and_remote_event_both_receive(self, server_bus: Bus) -> None:
+        server = server_bus
+        stream_received: list[dict[str, Any]] = []
+        event_received: list[dict[str, Any]] = []
+        stream_got = threading.Event()
+        event_got = threading.Event()
+
+        def stream_cb(m: dict[str, object]) -> None:
+            stream_received.append(m)
+            stream_got.set()
+
+        def event_cb(m: dict[str, object]) -> None:
+            event_received.append(m)
+            event_got.set()
+
+        server.subscribe("data", stream_cb, mode="stream")
+
+        port = server._transport.port
+        client = _make_client_bus(port)
+        _wait_connected(client._transport)
+
+        client.subscribe("data", event_cb, mode="event")
+        time.sleep(0.2)
+
+        # Publish from server — both local stream and remote event should get it
+        server.publish("data", {"seq": 1})
+        assert stream_got.wait(timeout=3)
+        assert event_got.wait(timeout=3)
+        assert stream_received == [{"seq": 1}]
+        assert event_received == [{"seq": 1}]
+
+        stream_got.clear()
+        event_got.clear()
+
+        # Publish from client — both local event and remote stream should get it
+        client.publish("data", {"seq": 2})
+        assert stream_got.wait(timeout=3)
+        assert event_got.wait(timeout=3)
+        assert stream_received == [{"seq": 1}, {"seq": 2}]
+        assert event_received == [{"seq": 1}, {"seq": 2}]
+
+        client.stop()

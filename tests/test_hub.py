@@ -117,6 +117,36 @@ class TestHub:
 
         assert "sensors" not in transport._remote_subs
 
+    def test_remote_publish_records_history(self, bus_with_hub: Bus) -> None:
+        bus = bus_with_hub
+        bus.state_topic("sensors", history=5)
+
+        import socketio
+
+        sio_client = socketio.Client()
+        got = threading.Event()
+
+        @sio_client.on("connect")
+        def on_connect() -> None:
+            got.set()
+
+        port = bus._transport.port
+        sio_client.connect(
+            f"http://127.0.0.1:{port}",
+            transports=["websocket"],
+            wait_timeout=5,
+        )
+        assert got.wait(timeout=3)
+
+        sio_client.emit("publish", {"topic": "sensors", "message": {"temp": 42.0}})
+        sio_client.emit("publish", {"topic": "sensors", "message": {"temp": 99.9}})
+        time.sleep(0.2)
+
+        t = bus.topic("sensors")
+        assert t.current() == {"temp": 99.9}
+        assert len(t.history()) == 2
+        sio_client.disconnect()
+
     def test_bus_without_hub(self) -> None:
         bus = Bus()
         received: list[dict[str, Any]] = []

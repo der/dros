@@ -164,7 +164,8 @@ class Bus:
         self, topic: str, message: dict[str, object], msg_id: int
     ) -> None:
         with self._lock:
-            self.topic(topic)
+            t = self.topic(topic)
+            t.record(message)
             local_subs = list(self._local_subs.get(topic, []))
         for sub in local_subs:
             if isinstance(sub, _EventSub):
