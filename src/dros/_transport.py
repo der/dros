@@ -65,11 +65,13 @@ class ServerTransport(Transport):
         *,
         ping_timeout: float = 2.0,
         ping_interval: float = 5.0,
+        static_dir: str | None = None,
     ) -> None:
         self._host = host
         self._port = port
         self._ping_timeout = ping_timeout
         self._ping_interval = ping_interval
+        self._static_dir = static_dir
         self._on_publish_handler: Callable[[str, dict[str, object], int], None] | None = (
             None
         )
@@ -104,6 +106,8 @@ class ServerTransport(Transport):
         pass
 
     def start(self) -> None:
+        import os
+
         import socketio
 
         self._sio = socketio.Server(
@@ -120,7 +124,20 @@ class ServerTransport(Transport):
 
         from werkzeug.serving import make_server
 
-        app = socketio.WSGIApp(self._sio)
+        if self._static_dir is not None:
+            static_files: dict[str, str] = {}
+            for root, _dirs, files in os.walk(self._static_dir):
+                for fname in files:
+                    abspath = os.path.join(root, fname)
+                    relpath = os.path.relpath(abspath, self._static_dir)
+                    url_path = "/" + relpath.replace(os.sep, "/")
+                    static_files[url_path] = abspath
+            dash = os.path.join(self._static_dir, "dashboard.html")
+            if os.path.isfile(dash):
+                static_files["/dashboard"] = dash
+            app = socketio.WSGIApp(self._sio, static_files=static_files)
+        else:
+            app = socketio.WSGIApp(self._sio)
         self._wsgi_server = make_server(
             self._host,
             self._port,
