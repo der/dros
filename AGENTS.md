@@ -4,7 +4,6 @@
 2. Minimum code that solves the problem. Nothing speculative.
 3. Touch only what you must. Clean up only your own mess.
 4. Define success criteria. Loop until verified.
-5. If adding new libraries ensure they are not GPL.
 
 # Project specific
 
