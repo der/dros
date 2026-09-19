@@ -235,6 +235,7 @@ class ClientTransport(Transport):
         self._connected = threading.Event()
         self._stop = threading.Event()
         self._lock = threading.Lock()
+        self._emit_lock = threading.Lock()
         self._thread: threading.Thread | None = None
 
     def set_on_publish(
@@ -247,24 +248,29 @@ class ClientTransport(Transport):
             self._sent_ids.append(msg_id)
         if self._connected.is_set():
             assert self._client is not None
-            self._client.emit(
-                "publish",
-                {"topic": topic, "message": message, "msg_id": msg_id},
-            )
+            # emit() is not thread-safe for multi-packet (binary) messages:
+            # serialize so header + attachments are enqueued atomically.
+            with self._emit_lock:
+                self._client.emit(
+                    "publish",
+                    {"topic": topic, "message": message, "msg_id": msg_id},
+                )
 
     def subscribe(self, topic: str) -> None:
         with self._lock:
             self._topics.add(topic)
         if self._connected.is_set():
             assert self._client is not None
-            self._client.emit("subscribe", topic)
+            with self._emit_lock:
+                self._client.emit("subscribe", topic)
 
     def unsubscribe(self, topic: str) -> None:
         with self._lock:
             self._topics.discard(topic)
         if self._connected.is_set():
             assert self._client is not None
-            self._client.emit("unsubscribe", topic)
+            with self._emit_lock:
+                self._client.emit("unsubscribe", topic)
 
     def start(self) -> None:
         self._stop.clear()
@@ -298,8 +304,9 @@ class ClientTransport(Transport):
             self._connected.set()
             self._sent_ids.clear()
             logger.info("Client connected to %s", self._server_url)
-            for topic in topics_to_subscribe:
-                client.emit("subscribe", topic)
+            with self._emit_lock:
+                for topic in topics_to_subscribe:
+                    client.emit("subscribe", topic)
 
         client.on("connect", _on_connect, namespace="/")
 
