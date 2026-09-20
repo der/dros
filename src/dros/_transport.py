@@ -184,7 +184,7 @@ class ServerTransport(Transport):
     def _on_remote_subscribe(self, sid: str, topic: str) -> None:
         self._remote_subs.setdefault(topic, set()).add(sid)
         self._sid_to_topics.setdefault(sid, set()).add(topic)
-        logger.debug("Remote %s subscribed to %s", sid, topic)
+        logger.info("Remote %s subscribed to %s", sid, topic)
 
     def _on_remote_unsubscribe(self, sid: str, topic: str) -> None:
         sids = self._remote_subs.get(topic)
@@ -193,7 +193,7 @@ class ServerTransport(Transport):
             if not sids:
                 del self._remote_subs[topic]
         self._sid_to_topics.get(sid, set()).discard(topic)
-        logger.debug("Remote %s unsubscribed from %s", sid, topic)
+        logger.info("Remote %s unsubscribed from %s", sid, topic)
 
     def _on_remote_publish(self, sid: str, data: dict[str, object]) -> None:
         topic = data.get("topic")
@@ -254,10 +254,16 @@ class ClientTransport(Transport):
             # emit() is not thread-safe for multi-packet (binary) messages:
             # serialize so header + attachments are enqueued atomically.
             with self._emit_lock:
-                self._client.emit(
-                    "publish",
-                    {"topic": topic, "message": message, "msg_id": msg_id},
-                )
+                if self._connected.is_set():
+                    try:
+                        self._client.emit(
+                            "publish",
+                            {"topic": topic, "message": message, "msg_id": msg_id},
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Publish of %s msg %d failed", topic, msg_id, exc_info=True
+                        )
 
     def subscribe(self, topic: str) -> None:
         with self._lock:
