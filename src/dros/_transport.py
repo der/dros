@@ -80,6 +80,7 @@ class ServerTransport(Transport):
         self._sio: socketio.Server | None = None
         self._wsgi_server: Any = None
         self._wsgi_thread: threading.Thread | None = None
+        self._emit_lock = threading.Lock()
 
     @property
     def port(self) -> int:
@@ -93,11 +94,12 @@ class ServerTransport(Transport):
     def publish(self, topic: str, message: dict[str, object], msg_id: int) -> None:
         for sid in self._remote_subs.get(topic, set()):
             if self._sio is not None:
-                self._sio.emit(
-                    "publish",
-                    {"topic": topic, "message": message, "msg_id": msg_id},
-                    to=sid,
-                )
+                with self._emit_lock:
+                    self._sio.emit(
+                        "publish",
+                        {"topic": topic, "message": message, "msg_id": msg_id},
+                        to=sid,
+                    )
 
     def subscribe(self, topic: str) -> None:
         pass
@@ -205,11 +207,12 @@ class ServerTransport(Transport):
 
         for other_sid in self._remote_subs.get(topic, set()):
             if other_sid != sid and self._sio is not None:
-                self._sio.emit(
-                    "publish",
-                    {"topic": topic, "message": message, "msg_id": msg_id},
-                    room=other_sid,
-                )
+                with self._emit_lock:
+                    self._sio.emit(
+                        "publish",
+                        {"topic": topic, "message": message, "msg_id": msg_id},
+                        room=other_sid,
+                    )
 
         if self._on_publish_handler is not None:
             self._on_publish_handler(topic, message, msg_id)
